@@ -1,23 +1,33 @@
 <template>
   <div
       class="feature"
-      :class="{ 'editing-mode': isEditingScenarios }"
+      :class="{
+        'editing-mode': isEditingScenarios,
+        'connection-mode': isConnectionMode,
+        'connection-source': isConnectionSource
+      }"
       :style="featureStyle"
       @mousedown="handleMouseDown"
+      @click="handleClick"
   >
-    <!-- 调整大小手柄 - 仅4个角，编辑模式下隐藏 -->
+    <!-- 调整大小手柄 - 仅4个角，编辑模式和连接模式下隐藏 -->
     <div
-        v-if="!isEditingScenarios"
+        v-if="!isEditingScenarios && !isConnectionMode"
         v-for="direction in cornerHandles"
         :key="direction"
         :class="['resize-handle', `resize-${direction}`]"
         @mousedown.stop="handleResizeStart($event, direction)"
     ></div>
 
+    <!-- 连接模式指示器 -->
+    <div v-if="isConnectionMode" class="connection-indicator">
+      {{ isConnectionSource ? '✓ Selected' : 'Click to connect' }}
+    </div>
+
     <!-- 内容区域 -->
     <div class="feature-header">
       <!-- 撤销/重做按钮 -->
-      <div class="history-controls">
+      <div class="history-controls" v-if="!isConnectionMode">
         <button
             @click="undo"
             :disabled="!canUndo"
@@ -50,13 +60,18 @@
 
       <!-- Edit Scenarios / Confirm 按钮 -->
       <button
+          v-if="!isConnectionMode"
           @click="toggleEditScenarios"
           :class="['edit-scenarios-btn', { 'confirm-btn': isEditingScenarios }]"
       >
         {{ isEditingScenarios ? 'Confirm' : 'Edit' }}
       </button>
 
-      <button @click="$emit('delete', feature.id)" class="delete-btn">
+      <button
+          v-if="!isConnectionMode"
+          @click="$emit('delete', feature.id)"
+          class="delete-btn"
+      >
         ×
       </button>
     </div>
@@ -68,6 +83,7 @@
           class="content-input"
           ref="contentInput"
           placeholder="Enter your content here..."
+          :disabled="isConnectionMode"
       ></textarea>
     </div>
 
@@ -96,6 +112,14 @@ const props = defineProps({
   canvasHeight: {
     type: Number,
     required: true
+  },
+  isConnectionMode: {
+    type: Boolean,
+    default: false
+  },
+  isConnectionSource: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -107,10 +131,10 @@ const emit = defineEmits([
   'end-drag',
   'start-resize',
   'resize',
-  'end-resize'
+  'end-resize',
+  'click-for-connection'
 ])
 
-// 仅保留4个角的调整手柄
 const cornerHandles = ['ne', 'se', 'sw', 'nw']
 
 const isEditingTitle = ref(false)
@@ -138,7 +162,8 @@ const featureStyle = computed(() => ({
   width: `${props.feature.width}px`,
   height: `${props.feature.height}px`,
   background: props.feature.color,
-  zIndex: isEditingScenarios.value ? 1000 : 1
+  zIndex: isEditingScenarios.value ? 1000 : (props.isConnectionMode ? 10 : 1),
+  cursor: props.isConnectionMode ? 'pointer' : (isEditingScenarios.value ? 'default' : 'move')
 }))
 
 // 初始化历史记录
@@ -152,13 +177,9 @@ const initHistory = () => {
 
 // 添加历史记录
 const addToHistory = (title, content) => {
-  // 移除当前位置之后的所有历史记录
   history.value = history.value.slice(0, historyIndex.value + 1)
-
-  // 添加新记录
   history.value.push({ title, content })
 
-  // 限制历史记录大小
   if (history.value.length > maxHistorySize) {
     history.value.shift()
   } else {
@@ -205,20 +226,20 @@ const toggleEditScenarios = () => {
       height: props.feature.height
     }
 
-    // 放大到1000x800
+    // 放大到1000x650
     emit('update', props.feature.id, {
       width: 1000,
-      height: 650
+      height: 650,
+      isEditing: true
     })
 
     isEditingScenarios.value = true
 
-    // 聚焦到内容区域
     nextTick(() => {
       contentInput.value?.focus()
     })
   } else {
-    // 退出编辑模式，恢复原尺寸
+    // 退出编辑模式
     confirmEdit()
   }
 }
@@ -230,7 +251,8 @@ const confirmEdit = () => {
       x: beforeEditState.value.x,
       y: beforeEditState.value.y,
       width: beforeEditState.value.width,
-      height: beforeEditState.value.height
+      height: beforeEditState.value.height,
+      isEditing: false
     })
     beforeEditState.value = null
   }
@@ -240,7 +262,6 @@ const confirmEdit = () => {
 // 内容变化时添加到历史记录
 let contentChangeTimer = null
 const onContentChange = () => {
-  // 防抖，500ms后添加到历史记录
   clearTimeout(contentChangeTimer)
   contentChangeTimer = setTimeout(() => {
     addToHistory(localTitle.value, localContent.value)
@@ -250,27 +271,32 @@ const onContentChange = () => {
 
 // 键盘快捷键
 const handleKeyDown = (e) => {
-  // Cmd/Ctrl + Z: 撤销
   if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
     e.preventDefault()
     undo()
   }
-  // Cmd/Ctrl + Shift + Z: 重做
   else if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'z') {
     e.preventDefault()
     redo()
   }
-  // Enter: 确认编辑（仅在编辑模式下）
   else if (e.key === 'Enter' && isEditingScenarios.value && (e.metaKey || e.ctrlKey)) {
     e.preventDefault()
     confirmEdit()
   }
 }
 
+// 处理点击（用于连接模式）
+const handleClick = (e) => {
+  if (props.isConnectionMode) {
+    e.stopPropagation()
+    emit('click-for-connection', props.feature.id)
+  }
+}
+
 // 拖动
 const handleMouseDown = (e) => {
-  // 编辑模式下禁止拖动
-  if (isEditingScenarios.value) return
+  // 连接模式或编辑模式下禁止拖动
+  if (props.isConnectionMode || isEditingScenarios.value) return
 
   if (e.target.closest('.resize-handle') ||
       e.target.closest('.delete-btn') ||
@@ -336,6 +362,8 @@ const handleResizeStart = (e, direction) => {
 
 // 编辑标题
 const editTitle = () => {
+  if (props.isConnectionMode) return
+
   isEditingTitle.value = true
   nextTick(() => {
     titleInput.value?.focus()
@@ -381,7 +409,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  transition: box-shadow 0.2s, z-index 0s;
+  transition: box-shadow 0.2s, transform 0.2s, z-index 0s;
   border: 2px solid rgba(255, 255, 255, 0.3);
 }
 
@@ -390,8 +418,40 @@ onUnmounted(() => {
   cursor: default;
 }
 
-.feature:hover {
+.feature.connection-mode {
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.feature.connection-mode:hover {
+  transform: scale(1.02);
+  box-shadow: 0 6px 24px rgba(78, 205, 196, 0.4);
+}
+
+.feature.connection-source {
+  border: 3px solid #FFA07A;
+  box-shadow: 0 0 0 4px rgba(255, 160, 122, 0.3);
+}
+
+.feature:hover:not(.connection-mode):not(.editing-mode) {
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
+
+.connection-indicator {
+  position: absolute;
+  top: -30px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #FFA07A;
+  color: white;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  pointer-events: none;
+  z-index: 1000;
 }
 
 .resize-handle {
@@ -562,6 +622,11 @@ onUnmounted(() => {
   outline: none;
   font-family: inherit;
   color: #333;
+}
+
+.content-input:disabled {
+  background: #f8f9fa;
+  cursor: not-allowed;
 }
 
 .content-input::placeholder {

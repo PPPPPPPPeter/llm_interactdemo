@@ -1,11 +1,11 @@
 <template>
   <div class="floating-chat-container">
-    <!-- 聊天按钮（收起状态） -->
+    <!-- 聊天按钮（收起状态） - 可拖动 -->
     <transition name="fade">
       <button
           v-if="!isExpanded"
           class="chat-toggle-btn"
-          @click="toggleChat"
+          @mousedown="handleButtonMouseDown"
           :style="{ left: `${position.x}px`, top: `${position.y}px` }"
       >
         <span class="chat-icon">💬</span>
@@ -136,7 +136,7 @@ const unreadCount = ref(0)
 
 // 窗口位置
 const position = ref({
-  x: window.innerWidth - 480, // 右下角
+  x: window.innerWidth - 480,
   y: window.innerHeight - 680,
 })
 
@@ -147,7 +147,61 @@ const dragState = ref({
   startY: 0,
   initialX: 0,
   initialY: 0,
+  isButtonDrag: false, // 区分是按钮拖动还是窗口拖动
+  hasMoved: false, // 记录是否移动过
 })
+
+// 处理按钮的鼠标按下事件
+const handleButtonMouseDown = (e) => {
+  e.preventDefault()
+
+  dragState.value.isButtonDrag = true
+  dragState.value.isDragging = true
+  dragState.value.hasMoved = false
+  dragState.value.startX = e.clientX
+  dragState.value.startY = e.clientY
+  dragState.value.initialX = position.value.x
+  dragState.value.initialY = position.value.y
+
+  const handleMouseMove = (e) => {
+    if (!dragState.value.isDragging) return
+
+    const deltaX = e.clientX - dragState.value.startX
+    const deltaY = e.clientY - dragState.value.startY
+
+    // 如果移动超过5px，认为是拖动而不是点击
+    if (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5) {
+      dragState.value.hasMoved = true
+    }
+
+    position.value.x = dragState.value.initialX + deltaX
+    position.value.y = dragState.value.initialY + deltaY
+
+    // 限制在窗口范围内
+    position.value.x = Math.max(0, Math.min(position.value.x, window.innerWidth - 60))
+    position.value.y = Math.max(0, Math.min(position.value.y, window.innerHeight - 60))
+  }
+
+  const handleMouseUp = () => {
+    const wasDragging = dragState.value.hasMoved
+
+    dragState.value.isDragging = false
+    dragState.value.isButtonDrag = false
+
+    // 如果没有移动，视为点击，打开聊天窗口
+    if (!wasDragging) {
+      toggleChat()
+    }
+
+    dragState.value.hasMoved = false
+
+    document.removeEventListener('mousemove', handleMouseMove)
+    document.removeEventListener('mouseup', handleMouseUp)
+  }
+
+  document.addEventListener('mousemove', handleMouseMove)
+  document.addEventListener('mouseup', handleMouseUp)
+}
 
 // 切换聊天窗口
 const toggleChat = () => {
@@ -168,7 +222,6 @@ const handleSendMessage = async () => {
   const message = inputMessage.value
   inputMessage.value = ''
 
-  // 自动调整textarea高度
   if (inputTextarea.value) {
     inputTextarea.value.style.height = 'auto'
   }
@@ -230,9 +283,10 @@ const formatTime = (date) => {
   })
 }
 
-// 拖动功能
+// 拖动聊天窗口（窗口展开时）
 const startDrag = (e) => {
   dragState.value.isDragging = true
+  dragState.value.isButtonDrag = false
   dragState.value.startX = e.clientX
   dragState.value.startY = e.clientY
   dragState.value.initialX = position.value.x
@@ -322,12 +376,16 @@ onUnmounted(() => {
   background: linear-gradient(135deg, #4ECDC4 0%, #45B7D1 100%);
   border: none;
   box-shadow: 0 4px 12px rgba(78, 205, 196, 0.4);
-  cursor: pointer;
+  cursor: grab;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: all 0.3s;
   z-index: 10000;
+}
+
+.chat-toggle-btn:active {
+  cursor: grabbing;
 }
 
 .chat-toggle-btn:hover {
