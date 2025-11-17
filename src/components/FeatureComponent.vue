@@ -1,11 +1,13 @@
 <template>
   <div
       class="feature"
+      :class="{ 'editing-mode': isEditingScenarios }"
       :style="featureStyle"
       @mousedown="handleMouseDown"
   >
-    <!-- 调整大小手柄 - 仅4个角 -->
+    <!-- 调整大小手柄 - 仅4个角，编辑模式下隐藏 -->
     <div
+        v-if="!isEditingScenarios"
         v-for="direction in cornerHandles"
         :key="direction"
         :class="['resize-handle', `resize-${direction}`]"
@@ -14,6 +16,26 @@
 
     <!-- 内容区域 -->
     <div class="feature-header">
+      <!-- 撤销/重做按钮 -->
+      <div class="history-controls">
+        <button
+            @click="undo"
+            :disabled="!canUndo"
+            class="history-btn"
+            title="Undo (Cmd/Ctrl+Z)"
+        >
+          ↶
+        </button>
+        <button
+            @click="redo"
+            :disabled="!canRedo"
+            class="history-btn"
+            title="Redo (Cmd/Ctrl+Shift+Z)"
+        >
+          ↷
+        </button>
+      </div>
+
       <input
           v-if="isEditingTitle"
           v-model="localTitle"
@@ -25,6 +47,15 @@
       <h3 v-else @dblclick="editTitle" class="title">
         {{ feature.title }}
       </h3>
+
+      <!-- Edit Scenarios / Confirm 按钮 -->
+      <button
+          @click="toggleEditScenarios"
+          :class="['edit-scenarios-btn', { 'confirm-btn': isEditingScenarios }]"
+      >
+        {{ isEditingScenarios ? 'Confirm' : 'Edit' }}
+      </button>
+
       <button @click="$emit('delete', feature.id)" class="delete-btn">
         ×
       </button>
@@ -32,15 +63,12 @@
 
     <div class="feature-content">
       <textarea
-          v-if="isEditingContent"
           v-model="localContent"
-          @blur="saveContent"
+          @input="onContentChange"
           class="content-input"
           ref="contentInput"
+          placeholder="Enter your content here..."
       ></textarea>
-      <p v-else @dblclick="editContent" class="content">
-        {{ feature.content }}
-      </p>
     </div>
 
     <div class="feature-footer">
@@ -50,7 +78,7 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
 
 const props = defineProps({
   feature: {
@@ -86,24 +114,168 @@ const emit = defineEmits([
 const cornerHandles = ['ne', 'se', 'sw', 'nw']
 
 const isEditingTitle = ref(false)
-const isEditingContent = ref(false)
+const isEditingScenarios = ref(false)
 const localTitle = ref(props.feature.title)
 const localContent = ref(props.feature.content)
 const titleInput = ref(null)
 const contentInput = ref(null)
+
+// 历史记录管理
+const history = ref([])
+const historyIndex = ref(-1)
+const maxHistorySize = 50
+
+// 保存编辑模式前的状态
+const beforeEditState = ref(null)
+
+// 计算属性
+const canUndo = computed(() => historyIndex.value > 0)
+const canRedo = computed(() => historyIndex.value < history.value.length - 1)
 
 const featureStyle = computed(() => ({
   left: `${props.feature.x}px`,
   top: `${props.feature.y}px`,
   width: `${props.feature.width}px`,
   height: `${props.feature.height}px`,
-  background: props.feature.color
+  background: props.feature.color,
+  zIndex: isEditingScenarios.value ? 1000 : 1
 }))
+
+// 初始化历史记录
+const initHistory = () => {
+  history.value = [{
+    title: localTitle.value,
+    content: localContent.value
+  }]
+  historyIndex.value = 0
+}
+
+// 添加历史记录
+const addToHistory = (title, content) => {
+  // 移除当前位置之后的所有历史记录
+  history.value = history.value.slice(0, historyIndex.value + 1)
+
+  // 添加新记录
+  history.value.push({ title, content })
+
+  // 限制历史记录大小
+  if (history.value.length > maxHistorySize) {
+    history.value.shift()
+  } else {
+    historyIndex.value++
+  }
+}
+
+// 撤销
+const undo = () => {
+  if (canUndo.value) {
+    historyIndex.value--
+    const state = history.value[historyIndex.value]
+    localTitle.value = state.title
+    localContent.value = state.content
+    emit('update', props.feature.id, {
+      title: state.title,
+      content: state.content
+    })
+  }
+}
+
+// 重做
+const redo = () => {
+  if (canRedo.value) {
+    historyIndex.value++
+    const state = history.value[historyIndex.value]
+    localTitle.value = state.title
+    localContent.value = state.content
+    emit('update', props.feature.id, {
+      title: state.title,
+      content: state.content
+    })
+  }
+}
+
+// 切换编辑模式
+const toggleEditScenarios = () => {
+  if (!isEditingScenarios.value) {
+    // 进入编辑模式
+    beforeEditState.value = {
+      x: props.feature.x,
+      y: props.feature.y,
+      width: props.feature.width,
+      height: props.feature.height
+    }
+
+    // 放大到1000x800
+    emit('update', props.feature.id, {
+      width: 1000,
+      height: 650
+    })
+
+    isEditingScenarios.value = true
+
+    // 聚焦到内容区域
+    nextTick(() => {
+      contentInput.value?.focus()
+    })
+  } else {
+    // 退出编辑模式，恢复原尺寸
+    confirmEdit()
+  }
+}
+
+// 确认编辑
+const confirmEdit = () => {
+  if (beforeEditState.value) {
+    emit('update', props.feature.id, {
+      x: beforeEditState.value.x,
+      y: beforeEditState.value.y,
+      width: beforeEditState.value.width,
+      height: beforeEditState.value.height
+    })
+    beforeEditState.value = null
+  }
+  isEditingScenarios.value = false
+}
+
+// 内容变化时添加到历史记录
+let contentChangeTimer = null
+const onContentChange = () => {
+  // 防抖，500ms后添加到历史记录
+  clearTimeout(contentChangeTimer)
+  contentChangeTimer = setTimeout(() => {
+    addToHistory(localTitle.value, localContent.value)
+    emit('update', props.feature.id, { content: localContent.value })
+  }, 500)
+}
+
+// 键盘快捷键
+const handleKeyDown = (e) => {
+  // Cmd/Ctrl + Z: 撤销
+  if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
+    e.preventDefault()
+    undo()
+  }
+  // Cmd/Ctrl + Shift + Z: 重做
+  else if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'z') {
+    e.preventDefault()
+    redo()
+  }
+  // Enter: 确认编辑（仅在编辑模式下）
+  else if (e.key === 'Enter' && isEditingScenarios.value && (e.metaKey || e.ctrlKey)) {
+    e.preventDefault()
+    confirmEdit()
+  }
+}
 
 // 拖动
 const handleMouseDown = (e) => {
+  // 编辑模式下禁止拖动
+  if (isEditingScenarios.value) return
+
   if (e.target.closest('.resize-handle') ||
       e.target.closest('.delete-btn') ||
+      e.target.closest('.edit-scenarios-btn') ||
+      e.target.closest('.history-btn') ||
       e.target.closest('input') ||
       e.target.closest('textarea')) {
     return
@@ -165,7 +337,6 @@ const handleResizeStart = (e, direction) => {
 // 编辑标题
 const editTitle = () => {
   isEditingTitle.value = true
-  localTitle.value = props.feature.title
   nextTick(() => {
     titleInput.value?.focus()
     titleInput.value?.select()
@@ -174,26 +345,30 @@ const editTitle = () => {
 
 const saveTitle = () => {
   isEditingTitle.value = false
-  if (localTitle.value.trim()) {
+  if (localTitle.value.trim() && localTitle.value !== props.feature.title) {
+    addToHistory(localTitle.value, localContent.value)
     emit('update', props.feature.id, { title: localTitle.value })
   }
 }
 
-// 编辑内容
-const editContent = () => {
-  isEditingContent.value = true
-  localContent.value = props.feature.content
-  nextTick(() => {
-    contentInput.value?.focus()
-  })
-}
+// 监听props变化
+watch(() => props.feature.title, (newVal) => {
+  localTitle.value = newVal
+})
 
-const saveContent = () => {
-  isEditingContent.value = false
-  if (localContent.value.trim()) {
-    emit('update', props.feature.id, { content: localContent.value })
-  }
-}
+watch(() => props.feature.content, (newVal) => {
+  localContent.value = newVal
+})
+
+onMounted(() => {
+  initHistory()
+  window.addEventListener('keydown', handleKeyDown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeyDown)
+  clearTimeout(contentChangeTimer)
+})
 </script>
 
 <style scoped>
@@ -206,8 +381,13 @@ const saveContent = () => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  transition: box-shadow 0.2s;
+  transition: box-shadow 0.2s, z-index 0s;
   border: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+.feature.editing-mode {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  cursor: default;
 }
 
 .feature:hover {
@@ -258,10 +438,41 @@ const saveContent = () => {
 .feature-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   padding: 12px 16px;
   background: rgba(0, 0, 0, 0.1);
   border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.history-controls {
+  display: flex;
+  gap: 4px;
+}
+
+.history-btn {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  border-radius: 4px;
+  color: white;
+  font-size: 16px;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  padding: 0;
+}
+
+.history-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.3);
+  transform: scale(1.05);
+}
+
+.history-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 
 .title {
@@ -284,6 +495,32 @@ const saveContent = () => {
   outline: none;
 }
 
+.edit-scenarios-btn {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  border-radius: 4px;
+  color: white;
+  font-size: 12px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.edit-scenarios-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px);
+}
+
+.edit-scenarios-btn.confirm-btn {
+  background: rgba(76, 175, 80, 0.8);
+}
+
+.edit-scenarios-btn.confirm-btn:hover {
+  background: rgba(76, 175, 80, 1);
+}
+
 .delete-btn {
   background: rgba(255, 255, 255, 0.2);
   border: none;
@@ -298,10 +535,11 @@ const saveContent = () => {
   justify-content: center;
   transition: all 0.2s;
   line-height: 1;
+  flex-shrink: 0;
 }
 
 .delete-btn:hover {
-  background: rgba(255, 255, 255, 0.3);
+  background: rgba(244, 67, 54, 0.8);
   transform: scale(1.1);
 }
 
@@ -309,15 +547,7 @@ const saveContent = () => {
   flex: 1;
   padding: 16px;
   overflow: auto;
-}
-
-.content {
-  margin: 0;
-  color: white;
-  font-size: 14px;
-  line-height: 1.6;
-  cursor: text;
-  white-space: pre-wrap;
+  background: white;
 }
 
 .content-input {
@@ -325,13 +555,17 @@ const saveContent = () => {
   height: 100%;
   background: white;
   border: none;
-  border-radius: 4px;
-  padding: 8px;
+  padding: 0;
   font-size: 14px;
   line-height: 1.6;
   resize: none;
   outline: none;
   font-family: inherit;
+  color: #333;
+}
+
+.content-input::placeholder {
+  color: #999;
 }
 
 .feature-footer {

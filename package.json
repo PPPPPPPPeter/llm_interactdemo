@@ -12,6 +12,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@langchain/openai": "^1.1.1",
+    "langchain": "^1.0.4",
     "vue": "^3.5.22"
   },
   "devDependencies": {

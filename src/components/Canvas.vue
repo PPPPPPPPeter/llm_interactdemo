@@ -10,9 +10,7 @@
         <span class="icon">+</span>
         <span>Drag to add a feature</span>
       </div>
-      <button @click="resetView" class="btn btn-secondary">
-        <span class="icon">⟲</span> Reset View
-      </button>
+
       <div class="zoom-controls">
         <button @click="zoomOut" class="btn btn-icon">-</button>
         <span class="zoom-level">{{ Math.round(scale * 100) }}%</span>
@@ -64,12 +62,15 @@
         />
       </div>
     </div>
+    <!-- 浮动聊天窗口 -->
+    <FloatingChatWindow />
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import FeatureComponent from './FeatureComponent.vue'
+import FloatingChatWindow from './FloatingChatWindow.vue'
 
 // 画布尺寸限制
 const CANVAS_WIDTH = 8000
@@ -217,8 +218,8 @@ const addFeatureAt = (x, y) => {
     id: nextId++,
     x: Math.max(0, Math.min(x, CANVAS_WIDTH - 200)),
     y: Math.max(0, Math.min(y, CANVAS_HEIGHT - 150)),
-    width: 200,
-    height: 150,
+    width: 300,
+    height: 200,
     color: getNextColor(),
     title: `Feature ${rectangles.value.length + 1}`,
     content: 'Double click to edit'
@@ -348,24 +349,25 @@ const resize = ({ clientX, clientY }) => {
   let newWidth = rect.width
   let newHeight = rect.height
 
-  const minSize = 50
+  const minWidth = 250
+  const minHeight = 180
 
   if (direction.includes('e')) {
-    newWidth = Math.max(minSize, rect.width + deltaX)
+    newWidth = Math.max(minWidth, rect.width + deltaX)
   }
   if (direction.includes('w')) {
-    const potentialWidth = Math.max(minSize, rect.width - deltaX)
-    if (potentialWidth >= minSize) {
+    const potentialWidth = Math.max(minWidth, rect.width - deltaX)
+    if (potentialWidth >= minWidth) {
       newX = rect.x + deltaX
       newWidth = potentialWidth
     }
   }
   if (direction.includes('s')) {
-    newHeight = Math.max(minSize, rect.height + deltaY)
+    newHeight = Math.max(minHeight, rect.height + deltaY)
   }
   if (direction.includes('n')) {
-    const potentialHeight = Math.max(minSize, rect.height - deltaY)
-    if (potentialHeight >= minSize) {
+    const potentialHeight = Math.max(minHeight, rect.height - deltaY)
+    if (potentialHeight >= minHeight) {
       newY = rect.y + deltaY
       newHeight = potentialHeight
     }
@@ -491,14 +493,6 @@ const zoomOut = () => {
   })
 }
 
-const resetView = () => {
-  scale.value = 1
-
-  if (canvasWrapper.value) {
-    canvasWrapper.value.scrollLeft = 0
-    canvasWrapper.value.scrollTop = 0
-  }
-}
 
 // 键盘快捷键
 const handleKeyDown = (e) => {
@@ -508,9 +502,6 @@ const handleKeyDown = (e) => {
   } else if ((e.ctrlKey || e.metaKey) && e.key === '-') {
     e.preventDefault()
     zoomOut()
-  } else if ((e.ctrlKey || e.metaKey) && e.key === '0') {
-    e.preventDefault()
-    resetView()
   }
 }
 
@@ -587,14 +578,6 @@ onUnmounted(() => {
   gap: 6px;
 }
 
-.btn-secondary {
-  background: #e0e0e0;
-  color: #333;
-}
-
-.btn-secondary:hover {
-  background: #d0d0d0;
-}
 
 .btn-icon {
   width: 32px;

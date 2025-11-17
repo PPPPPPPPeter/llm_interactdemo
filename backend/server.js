@@ -12,7 +12,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 
 // API 配置
 const API_KEYS = {
-    deepseek: 'sk-a38801e819a64a6aa126692dab71c76e', // DeepSeek API Key
+    deepseek: '', // DeepSeek API Key
     openai: '',   // OpenAI API Key
     google: ''    // Google API Key
 };
@@ -72,6 +72,68 @@ app.post('/api/chat', async (req, res) => {
             error: 'API 调用失败',
             details: error.message
         });
+    }
+});
+
+// 在现有的 server.js 中添加流式聊天接口
+app.post('/api/chat-stream', async (req, res) => {
+    try {
+        const { messages } = req.body;
+
+        if (!messages || !Array.isArray(messages)) {
+            return res.status(400).json({ error: '缺少必要参数: messages' });
+        }
+
+        // 设置SSE响应头
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+
+        const fetch = (await import('node-fetch')).default;
+
+        const response = await fetch('https://api.deepseek.com/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${API_KEYS.deepseek}` // 填入你的API Key
+            },
+            body: JSON.stringify({
+                model: 'deepseek-chat',
+                messages: messages,
+                stream: true
+            })
+        });
+
+        // 转发流式响应
+        response.body.on('data', (chunk) => {
+            const lines = chunk.toString().split('\n').filter(line => line.trim() !== '');
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const data = line.slice(6);
+                    if (data === '[DONE]') {
+                        res.write('data: [DONE]\n\n');
+                    } else {
+                        try {
+                            const parsed = JSON.parse(data);
+                            const content = parsed.choices[0]?.delta?.content;
+                            if (content) {
+                                res.write(`data: ${JSON.stringify({ content })}\n\n`);
+                            }
+                        } catch (e) {
+                            console.error('Parse error:', e);
+                        }
+                    }
+                }
+            }
+        });
+
+        response.body.on('end', () => {
+            res.end();
+        });
+
+    } catch (error) {
+        console.error('Stream error:', error);
+        res.status(500).json({ error: 'Stream failed', details: error.message });
     }
 });
 
